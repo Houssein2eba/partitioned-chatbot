@@ -17,8 +17,8 @@ spec:
     spec:
       containers:
         - name: ui
-          image: rag-chatbot:local
-          imagePullPolicy: Never
+          image: houssein2eba/rag-chatbot:local
+          imagePullPolicy: IfNotPresent
           command:
             - streamlit
             - run
