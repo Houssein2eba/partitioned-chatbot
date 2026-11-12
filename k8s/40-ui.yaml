@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-ui
+  namespace: rag-chatbot
+  labels:
+    app: rag-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rag-ui
+  template:
+    metadata:
+      labels:
+        app: rag-ui
+    spec:
+      containers:
+        - name: ui
+          image: rag-chatbot:local
+          imagePullPolicy: Never
+          command:
+            - streamlit
+            - run
+            - ui/streamlit_app.py
+            - --server.address=0.0.0.0
+            - --server.port=8501
+          ports:
+            - name: http
+              containerPort: 8501
+          envFrom:
+            - configMapRef:
+                name: rag-config
+            - secretRef:
+                name: rag-secrets
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-ui
+  namespace: rag-chatbot
+spec:
+  type: ClusterIP
+  selector:
+    app: rag-ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
