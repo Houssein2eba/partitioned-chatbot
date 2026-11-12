@@ -10,14 +10,14 @@ answers are verifiable, not hallucinated.
 
 | Concern | Choice | Why |
 |---|---|---|
-| Answering LLM | **Claude Sonnet 4.6** | Best quality/cost balance for RAG Q&A; configurable per request |
+| Answering LLM | **Groq** | Configurable hosted LLM for RAG Q&A |
 | Embeddings | **`BAAI/bge-small-en-v1.5`** (local) | Runs on CPU, **zero per-token cost**, fully offline |
 | Vector store | **Qdrant** | Production vector DB; free in Docker, scales to managed cloud |
 | API | **FastAPI** | Async, streaming (SSE), OpenAPI docs, typed |
-| Grounding | **Claude native citations** | Answers cite exact source spans — auditable |
+| Grounding | **Retrieved-source citations** | Answers include the source chunks used |
 | Hardening | API-key auth, non-root container, JSON logs, healthchecks | Enterprise defaults |
 
-The **only** paid dependency is the Claude API. Embeddings and the vector store
+The **only** paid dependency is the Groq API. Embeddings and the vector store
 cost nothing to run.
 
 ## Documentation
@@ -37,7 +37,7 @@ cost nothing to run.
  (your docs)│ pdf/docx/md │            │ (overlapping) │  (bge)    │ (vectors)│
             └─────────────┘            └──────────────┘            └────┬─────┘
                                                                         │ top-k
-  question ──▶ /v1/chat ──▶ retrieve ──▶ Claude (Sonnet 4.6) ──▶ answer + citations
+  question ──▶ /v1/chat ──▶ retrieve ──▶ Groq ──▶ answer + citations
                                          documents w/ citations enabled
 ```
 
@@ -46,7 +46,7 @@ cost nothing to run.
 ```bash
 # 1. Configure
 cp .env.example .env
-#   edit .env and set ANTHROPIC_API_KEY (and APP_API_KEYS for auth)
+#   edit .env and set GROQ_API_KEY (and APP_API_KEYS for auth)
 
 # 2. Add documents
 cp /path/to/your/*.pdf data/
@@ -72,7 +72,7 @@ Web chat UI: <http://localhost:8501> (the `ui` service starts automatically).
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env          # set ANTHROPIC_API_KEY; QDRANT_URL=http://localhost:6333
+cp .env.example .env          # set GROQ_API_KEY; QDRANT_URL=http://localhost:6333
 make qdrant                   # start Qdrant in Docker (separate terminal)
 
 cp /path/to/docs/*.pdf data/
@@ -138,7 +138,7 @@ Response:
     {"cited_text": "new hires accrue 15 days", "source": "handbook.pdf", "chunk_index": 3}
   ],
   "sources": [{"source": "handbook.pdf", "chunk_index": 3, "score": 0.82, "text": "..."}],
-  "model": "claude-sonnet-4-6",
+  "model": "openai/gpt-oss-120b",
   "usage": {"input_tokens": 1203, "output_tokens": 48}
 }
 ```
@@ -169,18 +169,16 @@ curl -X POST http://localhost:8000/v1/upload -F "file=@./contract.pdf"
 
 ## How grounding works
 
-Each retrieved chunk is sent to Claude as a `document` content block with
-`citations: {enabled: true}`. Claude is instructed to answer **only** from those
-documents and cite what it uses. The response's `citations` carry the exact
-`cited_text` and map back to the originating file and chunk — giving you an
-audit trail for every claim. If nothing relevant is retrieved, the bot says so
-instead of guessing.
+Each retrieved chunk is included in the prompt sent to Groq. Groq is instructed
+to answer **only** from those documents and cite the source filename. The API
+returns the retrieved chunks and derives citations from source mentions in the
+answer. If nothing relevant is retrieved, the bot says so instead of guessing.
 
 ## Configuration
 
 All via environment variables / `.env` — see [`.env.example`](.env.example).
-Key knobs: `ANTHROPIC_MODEL`, `TOP_K`, `CHUNK_SIZE`, `SCORE_THRESHOLD`,
-`ENABLE_THINKING`, `APP_API_KEYS`.
+Key knobs: `GROQ_MODEL`, `TOP_K`, `CHUNK_SIZE`, `SCORE_THRESHOLD`,
+`APP_API_KEYS`.
 
 ## Testing
 
@@ -188,18 +186,18 @@ Key knobs: `ANTHROPIC_MODEL`, `TOP_K`, `CHUNK_SIZE`, `SCORE_THRESHOLD`,
 make test        # or: pytest -q
 ```
 
-Tests mock Qdrant and Claude, so they run with no services and no API key.
+Tests mock Qdrant and the answering pipeline, so they run with no services and
+no API key.
 
 ## Production notes
 
 - **Auth**: always set `APP_API_KEYS` (comma-separated) in production.
-- **Secrets**: inject `ANTHROPIC_API_KEY` via your secrets manager, not a
+- **Secrets**: inject `GROQ_API_KEY` via your secrets manager, not a
   committed `.env`.
 - **Scaling**: the API is stateless — run multiple replicas behind a load
   balancer. Point them at a shared/managed Qdrant.
-- **Cost control**: switch `ANTHROPIC_MODEL` to `claude-haiku-4-5` for cheaper
-  high-volume Q&A, or `claude-opus-4-8` for maximum quality. Lower `TOP_K` to
-  reduce input tokens.
+- **Cost control**: choose an appropriate `GROQ_MODEL` for your workload. Lower
+  `TOP_K` to reduce input tokens.
 - **Observability**: logs are structured JSON on stdout — ship to your log
   platform.
 
@@ -224,7 +222,7 @@ never reaches Docker Hub. Published image: `<DOCKERHUB_USERNAME>/rag-chatbot`
 | `DOCKERHUB_USERNAME` | CI | Docker Hub username (lowercase) |
 | `DOCKERHUB_TOKEN` | CI | Docker Hub **access token** (not your password) |
 | `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | CD | Azure **OIDC** federated login (no stored secret) — setup in [DEPLOYMENT.md](DEPLOYMENT.md#deploy-to-aks-kubernetes) |
-| `ANTHROPIC_API_KEY` | CD | Claude API key (synced into the cluster) |
+| `GROQ_API_KEY` | CD | Groq API key (synced into the cluster) |
 | `APP_API_KEYS` | CD | API key(s) the service accepts |
 
 ### Deploy on any machine (Docker Compose, from Docker Hub)
@@ -254,7 +252,7 @@ app/            FastAPI service
 client/         Python SDK used by the CLI + UI
 scripts/        ingest.py (index data/)   chat.py (CLI chat)
 ui/             Streamlit web chat
-tests/          unit tests (mock Qdrant + Claude)
+tests/          unit tests (mock Qdrant + answering pipeline)
 k8s/            Kubernetes manifests (+ setup/ for cluster add-ons)
 terraform/      AKS cluster (IaC)
 .github/        CI/CD workflows + Dependabot

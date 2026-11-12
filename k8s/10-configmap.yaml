@@ -4,9 +4,8 @@ metadata:
   name: rag-config
   namespace: rag-chatbot
 data:
-  ANTHROPIC_MODEL: "claude-sonnet-4-6"
+  GROQ_MODEL: "openai/gpt-oss-120b"
   MAX_TOKENS: "2048"
-  ENABLE_THINKING: "false"
   EMBEDDING_MODEL: "BAAI/bge-small-en-v1.5"
   QDRANT_URL: "http://qdrant:6333"
   QDRANT_COLLECTION: "documents"
@@ -18,5 +17,5 @@ data:
   LOG_LEVEL: "INFO"
   CORS_ORIGINS: "*"
   RAG_API_URL: "http://rag-api:8000"
-# Secrets (ANTHROPIC_API_KEY, APP_API_KEYS, RAG_API_KEY) live in the
+# Secrets (GROQ_API_KEY, APP_API_KEYS, RAG_API_KEY) live in the
 # 'rag-secrets' Secret, created by the CD workflow from GitHub secrets.

@@ -35,7 +35,7 @@ CI/CD, operations, and troubleshooting.
  (your docs)│ pdf/docx/md │            │ (overlapping) │  (bge)    │ (vectors)│
             └─────────────┘            └──────────────┘            └────┬─────┘
                                                                         │ top-k
-  question ─▶ API ─▶ retrieve ─▶ Claude (Sonnet 4.6) ─▶ answer + citations
+  question ─▶ API ─▶ retrieve ─▶ Groq ─▶ answer + citations
 ```
 
 Three runtime containers:
@@ -43,10 +43,10 @@ Three runtime containers:
 | Container | Image | Port | Purpose |
 |---|---|---|---|
 | `qdrant` | `qdrant/qdrant` | 6333 (HTTP), 6334 (gRPC) | Vector database (persists to a volume) |
-| `api` | `siddhuge/rag-chatbot` | 8000 | FastAPI service (retrieval + Claude) |
+| `api` | `siddhuge/rag-chatbot` | 8000 | FastAPI service (retrieval + Groq) |
 | `ui` | `siddhuge/rag-chatbot` | 8501 | Streamlit web chat (same image, different command) |
 
-External dependency: the **Claude API** (the only paid component). Embeddings
+External dependency: the **Groq API** (the only paid component). Embeddings
 run locally and cost nothing.
 
 ---
@@ -97,10 +97,9 @@ Edit `.env`. Full reference:
 
 | Variable | Default | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | **Required.** Your Claude API key. |
-| `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Answering model. Use `claude-haiku-4-5` (cheaper) or `claude-opus-4-8` (best). |
+| `GROQ_API_KEY` | — | **Required.** Your Groq API key. |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Answering Groq model. |
 | `MAX_TOKENS` | `2048` | Max tokens in the answer. |
-| `ENABLE_THINKING` | `false` | `true` enables adaptive thinking (deeper reasoning, higher latency/cost). |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Local embedding model (baked into the image). |
 | `QUERY_INSTRUCTION` | (bge prompt) | Instruction prefix added to queries. |
 | `QDRANT_URL` | `http://localhost:6333` | Qdrant endpoint. In Compose this is overridden to `http://qdrant:6333`. |
@@ -170,7 +169,7 @@ containers.
 
 ```bash
 # 1. Configure
-cp .env.example .env        # set ANTHROPIC_API_KEY (+ APP_API_KEYS / RAG_API_KEY)
+cp .env.example .env        # set GROQ_API_KEY (+ APP_API_KEYS / RAG_API_KEY)
 
 # 2. Add documents
 cp /path/to/docs/*.pdf data/
@@ -216,7 +215,7 @@ curl -O https://raw.githubusercontent.com/Siddhuge/RAG-ChatBot/main/.env.example
 mv .env.example .env
 mkdir data
 
-# 2. Edit .env — set ANTHROPIC_API_KEY, APP_API_KEYS, RAG_API_KEY, DOCKERHUB_USERNAME=siddhuge
+# 2. Edit .env — set GROQ_API_KEY, APP_API_KEYS, RAG_API_KEY, DOCKERHUB_USERNAME=siddhuge
 
 # 3. Pull and start
 export DOCKERHUB_USERNAME=siddhuge
@@ -325,7 +324,7 @@ curl -s -X POST http://localhost:8000/v1/chat \
 ```
 
 `vectors > 0` confirms ingestion worked. A JSON answer with `citations` confirms
-the full pipeline (retrieval → Claude → grounding).
+the full pipeline (retrieval → Groq → grounding).
 
 ---
 
@@ -361,7 +360,7 @@ sidebar, chat with streaming + citation panels.
 - **Authentication:** always set `APP_API_KEYS` to a strong random value. With
   it empty the API is open.
 - **Secrets management:** don't ship a `.env` with real keys. Inject
-  `ANTHROPIC_API_KEY` and `APP_API_KEYS` via your platform's secrets store
+  `GROQ_API_KEY` and `APP_API_KEYS` via your platform's secrets store
   (Docker/K8s secrets, AWS Secrets Manager, etc.). Rotate keys if exposed.
 - **TLS:** terminate HTTPS at a reverse proxy (nginx/Caddy/Traefik) in front of
   the API and UI — see section 13.
@@ -370,8 +369,8 @@ sidebar, chat with streaming + citation panels.
   balancer, all pointing at one shared (or managed) Qdrant.
 - **Resource sizing:** API container ~1–2 GB RAM (the embedding model loads in
   memory). Qdrant memory scales with vector count.
-- **Cost control:** `claude-haiku-4-5` for cheap high-volume Q&A; lower `TOP_K`
-  to cut input tokens; keep `ENABLE_THINKING=false` unless needed.
+- **Cost control:** choose a suitable `GROQ_MODEL` for your workload; lower
+  `TOP_K` to cut input tokens.
 - **Observability:** logs are structured JSON on stdout — ship to your log
   platform (`docker compose logs`, or a log driver).
 - **Pin image versions** in production: use a tag like
@@ -394,7 +393,7 @@ curl -O https://raw.githubusercontent.com/Siddhuge/RAG-ChatBot/main/docker-compo
 curl -fsSL https://raw.githubusercontent.com/Siddhuge/RAG-ChatBot/main/.env.example -o .env
 mkdir data
 
-# 3. Edit .env — ANTHROPIC_API_KEY, APP_API_KEYS, RAG_API_KEY, DOCKERHUB_USERNAME=siddhuge
+# 3. Edit .env — GROQ_API_KEY, APP_API_KEYS, RAG_API_KEY, DOCKERHUB_USERNAME=siddhuge
 
 # 4. Start
 export DOCKERHUB_USERNAME=siddhuge
@@ -498,7 +497,7 @@ secrets. The workflow requests an OIDC token via `permissions: id-token: write`.
 ### Every deploy (automated by CD)
 
 Once the cluster exists and the CD secrets are set (`AZURE_CLIENT_ID`,
-`AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `ANTHROPIC_API_KEY`, `APP_API_KEYS`),
+`AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `GROQ_API_KEY`, `APP_API_KEYS`),
 a push to `main` runs CI then [`cd.yml`](.github/workflows/cd.yml), which:
 
 1. logs into Azure and fetches AKS credentials,
@@ -578,7 +577,7 @@ docker image prune -f        # remove dangling images
 | `env file .env not found` | No `.env` | `cp .env.example .env` and edit |
 | API container restarts; `error parsing value for field "api_keys"` | Old build before the `NoDecode` fix | Rebuild (`docker compose up -d --build`) |
 | Ingest 500: `PermissionError ... /huggingface` | Old build; model cache permission | Rebuild — the model is now baked into the image |
-| Chat 500: `401 invalid x-api-key` (in API logs) | Invalid/expired **Anthropic** key | Put a valid `ANTHROPIC_API_KEY` in `.env`, `docker compose up -d` |
+| Chat 500: `401 invalid x-api-key` (in API logs) | Invalid/expired API key | Put a valid `APP_API_KEYS` value in `.env`, `docker compose up -d` |
 | API returns `401` to your curl | Missing/wrong `X-API-Key` | Send a key matching `APP_API_KEYS` |
 | `vectors: 0` in health | Nothing ingested | Add files to `data/`, run `/v1/ingest` |
 | Docker login: `malformed HTTP Authorization header` | Token has a trailing newline, or **uppercase username** | Re-create the secret cleanly; username must be lowercase |
@@ -588,5 +587,5 @@ docker image prune -f        # remove dangling images
 | UI shows `unhealthy` but works | UI inherits the API healthcheck (probes :8000) | Cosmetic only; the UI serves on :8501 |
 | Streaming hangs behind a proxy | Proxy buffering | Disable buffering for `/v1/chat/stream` (see nginx config) |
 
-For Claude-credential failures, the API logs show the upstream error; for
+For Groq-credential failures, the API logs show the upstream error; for
 container issues, `docker compose logs <service>` is the first stop.

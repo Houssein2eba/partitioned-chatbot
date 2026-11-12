@@ -10,5 +10,5 @@ import os
 
 os.environ["APP_API_KEYS"] = ""
 os.environ["CORS_ORIGINS"] = "*"
-# Keep tests offline: never require a real Claude key.
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+# Keep tests offline: never require a real Groq key.
+os.environ.setdefault("GROQ_API_KEY", "test-key")
