@@ -1,6 +1,9 @@
 name: Test local runner
 
 on:
+  push:
+    branches:
+      - with-k8s
   workflow_dispatch:
 
 jobs:
