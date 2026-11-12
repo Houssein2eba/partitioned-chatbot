@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Check tools
-        shell: powershell
+        shell: cmd
         run: |
           docker --version
           kubectl version --client
