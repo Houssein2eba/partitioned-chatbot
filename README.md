@@ -1,4 +1,4 @@
-# Enterprise RAG Chatbot
+# Enterprise RAG Chatbot — Docker-only
 
 A production-grade Retrieval-Augmented Generation chatbot over **your own
 documents**. Drop files into `data/`, ingest them, and ask questions through a
@@ -20,14 +20,18 @@ answers are verifiable, not hallucinated.
 The **only** paid dependency is the Groq API. Embeddings and the vector store
 cost nothing to run.
 
+## This learning branch
+
+This `docker-only` branch intentionally contains only the application and its
+Docker runtime. Kubernetes, Terraform, and CI/CD are introduced in later
+learning branches. The final `main` branch combines all stages.
+
 ## Documentation
 
 | Guide | What's in it |
 |---|---|
 | **This README** | Overview, quick start, the three interfaces, API reference |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | Full deployment guide — local, Docker Compose, Docker Hub, and Kubernetes/AKS |
-| [terraform/README.md](terraform/README.md) | Provision a cost-effective AKS cluster with Terraform |
-| [k8s/INGRESS-SETUP.md](k8s/INGRESS-SETUP.md) | Ingress controller, TLS (cert-manager + Let's Encrypt), DNS (external-dns/GoDaddy) |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Local and Docker deployment guide |
 
 ## Architecture
 
@@ -201,46 +205,16 @@ no API key.
 - **Observability**: logs are structured JSON on stdout — ship to your log
   platform.
 
-## Deployment & CI/CD
+## Deployment
 
-### Pipelines (GitHub Actions)
-
-| Workflow | What it does |
-|---|---|
-| [`ci.yml`](.github/workflows/ci.yml) | On every push/PR: **test** → **security scan** (Gitleaks, Bandit, Trivy) → **build** → **image scan** → **push** to Docker Hub (push events only) |
-| [`cd.yml`](.github/workflows/cd.yml) | After CI succeeds on `main` (or manual): deploy the image to **AKS** |
-| [`dependabot.yml`](.github/dependabot.yml) | Weekly dependency-update PRs (pip, Docker, Actions) |
-
-The container image is **scanned before it is pushed**, so a vulnerable image
-never reaches Docker Hub. Published image: `<DOCKERHUB_USERNAME>/rag-chatbot`
-(`latest`, `main`, `<sha>` on `main`; `1.2.3`, `1.2`, `<sha>` on tag `v1.2.3`).
-
-**Required repository secrets** (Settings → Secrets and variables → Actions):
-
-| Secret | For | Value |
-|---|---|---|
-| `DOCKERHUB_USERNAME` | CI | Docker Hub username (lowercase) |
-| `DOCKERHUB_TOKEN` | CI | Docker Hub **access token** (not your password) |
-| `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | CD | Azure **OIDC** federated login (no stored secret) — setup in [DEPLOYMENT.md](DEPLOYMENT.md#deploy-to-aks-kubernetes) |
-| `GROQ_API_KEY` | CD | Groq API key (synced into the cluster) |
-| `APP_API_KEYS` | CD | API key(s) the service accepts |
-
-### Deploy on any machine (Docker Compose, from Docker Hub)
-
-No source checkout needed — just [`docker-compose.deploy.yml`](docker-compose.deploy.yml)
-and a `.env`:
+This branch uses Docker Compose only:
 
 ```bash
-export DOCKERHUB_USERNAME=your-dockerhub-username   # or set it in .env
-docker compose -f docker-compose.deploy.yml --env-file .env up -d
+docker compose up -d --build
+curl -X POST http://localhost:8000/v1/ingest
 ```
 
-### Deploy to Kubernetes / Azure (AKS)
-
-- Provision a cost-effective cluster: [terraform/](terraform/) (see [terraform/README.md](terraform/README.md))
-- App manifests: [k8s/](k8s/) — Qdrant, API, UI, config, ingress
-- Ingress + TLS + DNS: [k8s/INGRESS-SETUP.md](k8s/INGRESS-SETUP.md)
-- End-to-end runbook: [DEPLOYMENT.md → Deploy to AKS](DEPLOYMENT.md#deploy-to-aks-kubernetes)
+Kubernetes, CI/CD, and Terraform are deliberately added in later branches.
 
 ## Project structure
 
@@ -253,9 +227,6 @@ client/         Python SDK used by the CLI + UI
 scripts/        ingest.py (index data/)   chat.py (CLI chat)
 ui/             Streamlit web chat
 tests/          unit tests (mock Qdrant + answering pipeline)
-k8s/            Kubernetes manifests (+ setup/ for cluster add-ons)
-terraform/      AKS cluster (IaC)
-.github/        CI/CD workflows + Dependabot
 Dockerfile  docker-compose*.yml  Makefile  requirements.txt
 ```
 # partitioned-chatbot
