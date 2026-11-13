@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI5):
     settings = get_settings()
     configure_logging(settings.log_level)
     logger.info("starting RAG chatbot", extra={"version": __version__})
