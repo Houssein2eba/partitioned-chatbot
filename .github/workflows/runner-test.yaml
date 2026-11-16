@@ -1,23 +1,29 @@
+# Display name shown in the GitHub Actions workflow list.
 name: Test local runner
 
+# Start the workflow after changes reach main, or when launched manually.
 on:
   push:
     branches:
       - main
   workflow_dispatch:
 
+# Define the test job and run it on the project's self-hosted Windows runner.
 jobs:
   test:
     runs-on: [self-hosted, windows, x64]
 
+# Execute command steps through Windows Command Prompt.
     defaults:
       run:
         shell: cmd
 
+# Check out the repository so subsequent steps can access its files.
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+# Verify that the container and Kubernetes tools are installed and usable.
       - name: Check tools
         run: |
           docker --version
@@ -25,11 +31,20 @@ jobs:
           kubectl config current-context
           kubectl get nodes
 
+# Use Python 3.11, which has compatible binary wheels for the pinned dependencies.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+# Install the application's Python dependencies from the lock-style requirements file.
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
+# Run the automated test suite.
       - name: Run tests
         run: python -m pytest -q
 
+# Build the Docker image and tag it with the current GitHub commit SHA.
       - name: Build Docker image
         run: docker build -t rag-chatbot:%GITHUB_SHA% .
