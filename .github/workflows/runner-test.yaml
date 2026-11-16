@@ -3,7 +3,7 @@ name: Test local runner
 on:
   push:
     branches:
-      - with-k8s
+      - main
   workflow_dispatch:
 
 jobs:
