@@ -32,6 +32,7 @@ learning branches. The final `main` branch combines all stages.
 |---|---|
 | **This README** | Overview, quick start, the three interfaces, API reference |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Local and Docker deployment guide |
+| [k8s-instructions.md](k8s-instructions.md) | Kubernetes deployment commands |
 
 ## Architecture
 
