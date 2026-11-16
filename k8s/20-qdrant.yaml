@@ -1,11 +1,14 @@
+# Expose Qdrant inside the cluster for the API.
 apiVersion: v1
 kind: Service
 metadata:
   name: qdrant
   namespace: rag-chatbot
 spec:
+  # Route service traffic to the Qdrant StatefulSet pods.
   selector:
     app: qdrant
+  # Expose Qdrant's HTTP and gRPC ports to cluster clients.
   ports:
     - name: http
       port: 6333
@@ -14,12 +17,14 @@ spec:
       port: 6334
       targetPort: 6334
 ---
+# Run one persistent Qdrant instance with stable storage.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: qdrant
   namespace: rag-chatbot
 spec:
+  # Keep a stable network identity and one replica for local deployment.
   serviceName: qdrant
   replicas: 1
   selector:
@@ -27,23 +32,28 @@ spec:
       app: qdrant
   template:
     metadata:
+      # Label pods so the service can select them.
       labels:
         app: qdrant
     spec:
       containers:
         - name: qdrant
+          # Use a fixed Qdrant version for repeatable deployments.
           image: qdrant/qdrant:v1.12.5
           ports:
             - containerPort: 6333
             - containerPort: 6334
+          # Persist the vector database data outside the container filesystem.
           volumeMounts:
             - name: qdrant-storage
               mountPath: /qdrant/storage
+          # Wait until Qdrant accepts TCP connections before marking it ready.
           readinessProbe:
             tcpSocket:
               port: 6333
             initialDelaySeconds: 10
             periodSeconds: 10
+  # Provision persistent storage for the StatefulSet.
   volumeClaimTemplates:
     - metadata:
         name: qdrant-storage

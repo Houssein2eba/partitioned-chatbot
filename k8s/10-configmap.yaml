@@ -1,19 +1,25 @@
+# Store non-secret application settings shared by the API and UI.
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  # Identify this configuration object inside the chatbot namespace.
   name: rag-config
   namespace: rag-chatbot
 data:
+  # Configure the remote answering model and local embedding model.
   GROQ_MODEL: "openai/gpt-oss-120b"
   MAX_TOKENS: "2048"
   EMBEDDING_MODEL: "BAAI/bge-small-en-v1.5"
+  # Configure Qdrant connectivity and the collection used for vectors.
   QDRANT_URL: "http://qdrant:6333"
   QDRANT_COLLECTION: "documents"
+  # Configure document storage and chunking/retrieval behavior.
   DATA_DIR: "/app/data"
   CHUNK_SIZE: "512"
   CHUNK_OVERLAP: "64"
   TOP_K: "5"
   SCORE_THRESHOLD: "0.5"
+  # Configure logging, cross-origin access, and the UI's API endpoint.
   LOG_LEVEL: "INFO"
   CORS_ORIGINS: "*"
   RAG_API_URL: "http://rag-api:8000"

@@ -1,4 +1,6 @@
+# Define the local application stack and its shared Docker volume.
 services:
+  # Store document vectors for retrieval.
   qdrant:
     image: qdrant/qdrant:v1.12.5
     restart: unless-stopped
@@ -14,6 +16,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # Run the FastAPI backend and ingestion service.
   api:
     build: .
     restart: unless-stopped
@@ -32,6 +35,7 @@ services:
       # Mount your documents so /v1/ingest can read them.
       - ./data:/app/data
 
+  # Run the Streamlit web interface.
   ui:
     build: .
     restart: unless-stopped
@@ -52,5 +56,6 @@ services:
       - --server.address=0.0.0.0
       - --server.port=8501
 
+# Keep Qdrant data across container restarts.
 volumes:
   qdrant_storage:

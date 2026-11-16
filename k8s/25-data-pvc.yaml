@@ -1,11 +1,15 @@
+# Reserve persistent storage for documents uploaded to the API.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  # Keep document storage in the chatbot namespace.
   name: rag-data
   namespace: rag-chatbot
 spec:
+  # The single API replica mounts this volume for reading and writing documents.
   accessModes:
     - ReadWriteOnce
+  # Request two GiB from the cluster's default storage class.
   resources:
     requests:
       storage: 2Gi

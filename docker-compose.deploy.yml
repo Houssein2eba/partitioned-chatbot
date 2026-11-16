@@ -1,4 +1,4 @@
-# Deploy on ANY machine without the source code.
+# Deploy on any machine without the source code.
 #
 # This pulls the published image from Docker Hub instead of building locally.
 # You only need this file + a .env file on the target machine.
@@ -7,9 +7,11 @@
 #   export DOCKERHUB_USERNAME=your-dockerhub-username
 #   docker compose -f docker-compose.deploy.yml --env-file .env up -d
 #
-# (DOCKERHUB_USERNAME may also be set in the .env file.)
+# DOCKERHUB_USERNAME may also be set in the .env file.
 
+# Define the production-like stack and its persistent volume.
 services:
+  # Store document vectors for retrieval.
   qdrant:
     image: qdrant/qdrant:v1.12.5
     restart: unless-stopped
@@ -24,6 +26,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # Run the published FastAPI backend image.
   api:
     image: ${DOCKERHUB_USERNAME}/rag-chatbot:${IMAGE_TAG}
     pull_policy: always
@@ -41,6 +44,7 @@ services:
     volumes:
       - ./data:/app/data
 
+  # Run the published Streamlit web interface image.
   ui:
     image: ${DOCKERHUB_USERNAME}/rag-chatbot:${IMAGE_TAG}
     pull_policy: always
@@ -60,5 +64,6 @@ services:
       - --server.address=0.0.0.0
       - --server.port=8501
 
+# Keep Qdrant data across container restarts.
 volumes:
   qdrant_storage:

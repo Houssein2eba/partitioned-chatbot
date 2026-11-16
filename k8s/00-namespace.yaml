@@ -1,4 +1,6 @@
+# Create an isolated namespace for all chatbot resources.
 apiVersion: v1
 kind: Namespace
 metadata:
+  # Use one namespace so resources and cleanup stay grouped together.
   name: rag-chatbot

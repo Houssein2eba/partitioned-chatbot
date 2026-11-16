@@ -1,3 +1,4 @@
+# Deploy the Streamlit web interface.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,39 +7,47 @@ metadata:
   labels:
     app: rag-ui
 spec:
+  # Run one UI instance for the local deployment.
   replicas: 1
   selector:
     matchLabels:
       app: rag-ui
   template:
     metadata:
+      # Label pods so the UI service can select them.
       labels:
         app: rag-ui
     spec:
       containers:
         - name: ui
+          # Use the locally built application image.
           image: houssein2eba/rag-chatbot:local
           imagePullPolicy: IfNotPresent
+          # Start Streamlit on all interfaces and the container's UI port.
           command:
             - streamlit
             - run
             - ui/streamlit_app.py
             - --server.address=0.0.0.0
             - --server.port=8501
+          # Expose the Streamlit HTTP port inside the cluster.
           ports:
             - name: http
               containerPort: 8501
+          # Load shared settings and credentials into the UI container.
           envFrom:
             - configMapRef:
                 name: rag-config
             - secretRef:
                 name: rag-secrets
+          # Only send traffic to UI pods that are ready to serve requests.
           readinessProbe:
             httpGet:
               path: /_stcore/health
               port: http
             initialDelaySeconds: 30
             periodSeconds: 15
+          # Reserve and cap resources for predictable local scheduling.
           resources:
             requests:
               cpu: 100m
@@ -47,15 +56,19 @@ spec:
               cpu: 500m
               memory: 512Mi
 ---
+# Expose the UI internally for port-forwarding.
 apiVersion: v1
 kind: Service
 metadata:
   name: rag-ui
   namespace: rag-chatbot
 spec:
+  # Keep the service internal; users access it through kubectl port-forward.
   type: ClusterIP
+  # Route requests to UI pods.
   selector:
     app: rag-ui
+  # Present port 80 while forwarding to the named container HTTP port.
   ports:
     - name: http
       port: 80

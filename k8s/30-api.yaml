@@ -1,3 +1,4 @@
+# Deploy the FastAPI backend.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,41 +7,50 @@ metadata:
   labels:
     app: rag-api
 spec:
+  # Run one API instance for the local deployment.
   replicas: 1
   selector:
     matchLabels:
       app: rag-api
   template:
     metadata:
+      # Label pods so the API service can select them.
       labels:
         app: rag-api
     spec:
+      # Match the non-root container user with the mounted data volume group.
       securityContext:
         fsGroup: 1000
       containers:
         - name: api
+          # Use the locally built application image.
           image: houssein2eba/rag-chatbot:local
           imagePullPolicy: IfNotPresent
+          # Expose the FastAPI HTTP port inside the cluster.
           ports:
             - name: http
               containerPort: 8000
+          # Load shared settings and credentials into the container.
           envFrom:
             - configMapRef:
                 name: rag-config
             - secretRef:
                 name: rag-secrets
+          # Only send traffic to pods that report a healthy API.
           readinessProbe:
             httpGet:
               path: /v1/health
               port: http
             initialDelaySeconds: 30
             periodSeconds: 15
+          # Restart the container if the API stops responding.
           livenessProbe:
             httpGet:
               path: /v1/health
               port: http
             initialDelaySeconds: 60
             periodSeconds: 20
+          # Reserve and cap resources for predictable local scheduling.
           resources:
             requests:
               cpu: 250m
@@ -48,22 +58,27 @@ spec:
             limits:
               cpu: "1"
               memory: 2Gi
+          # Mount uploaded documents at the path configured in the container.
           volumeMounts:
             - name: data
               mountPath: /app/data
+      # Attach the shared document volume to the API pod.
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: rag-data
 ---
+# Expose the API internally to the UI and port-forwarding clients.
 apiVersion: v1
 kind: Service
 metadata:
   name: rag-api
   namespace: rag-chatbot
 spec:
+  # Route requests to API pods.
   selector:
     app: rag-api
+  # Map the service port to the named container HTTP port.
   ports:
     - name: http
       port: 8000
