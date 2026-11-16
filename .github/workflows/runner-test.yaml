@@ -1,14 +1,15 @@
 # Display name shown in the GitHub Actions workflow list.
-name: Test local runner
+name: CI/CD
 
-# Start the workflow after changes reach main, or when launched manually.
+# Run CI/CD for the test branch and main, or when launched manually.
 on:
   push:
     branches:
+      - featcher/cd
       - main
   workflow_dispatch:
 
-# Define the test job and run it on the project's self-hosted Windows runner.
+# Define the CI/CD job and run it on the project's self-hosted Windows runner.
 jobs:
   test:
     runs-on: [self-hosted, windows, x64]
@@ -62,3 +63,35 @@ jobs:
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: docker push %DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA%
+
+# Confirm that the cluster has the application credentials before deployment.
+      - name: Verify Kubernetes prerequisites
+        run: |
+          kubectl apply -f k8s/00-namespace.yaml
+          kubectl -n rag-chatbot get secret rag-secrets
+
+# Create or update the Kubernetes resources used by the application.
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -f k8s/00-namespace.yaml
+          kubectl apply -f k8s/10-configmap.yaml
+          kubectl apply -f k8s/20-qdrant.yaml
+          kubectl apply -f k8s/25-data-pvc.yaml
+          kubectl apply -f k8s/30-api.yaml
+          kubectl apply -f k8s/40-ui.yaml
+
+# Point both application deployments at the immutable image built for this commit.
+      - name: Deploy published image
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          kubectl -n rag-chatbot set image deployment/rag-api api=%DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA%
+          kubectl -n rag-chatbot set image deployment/rag-ui ui=%DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA%
+
+# Wait until Kubernetes confirms that the new API and UI pods are available.
+      - name: Verify Kubernetes rollout
+        run: |
+          kubectl -n rag-chatbot rollout status statefulset/qdrant --timeout=180s
+          kubectl -n rag-chatbot rollout status deployment/rag-api --timeout=180s
+          kubectl -n rag-chatbot rollout status deployment/rag-ui --timeout=180s
+          kubectl -n rag-chatbot get pods -o wide
