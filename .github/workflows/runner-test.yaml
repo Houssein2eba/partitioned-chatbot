@@ -51,10 +51,14 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-# Build the Docker image and tag it with the current GitHub commit SHA.
+# Build the Docker image and tag it with the current Git commit SHA.
       - name: Build Docker image
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: docker build -t %DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA% .
 
-# Push Docker image
+# Push the image to Docker Hub using the same tag.
       - name: Push Docker image
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: docker push %DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA%
