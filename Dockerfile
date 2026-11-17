@@ -18,8 +18,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 # Install CPU-only PyTorch FIRST so sentence-transformers reuses it instead of
 # pulling the multi-GB CUDA build. Shrinks the image from ~6GB to ~1.5GB.
-RUN pip install --no-cache-dir torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir -r requirements.txt
+# Install the CPU-only dependency set without compiling Python bytecode.
+# The application runs on CPU, so the CUDA-enabled PyTorch distribution is not needed.
+RUN pip install --no-cache-dir --no-compile \
+        torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir --no-compile -r requirements.txt \
+    && find /usr/local/lib/python3.11/site-packages \
+        -type d -name __pycache__ -prune -exec rm -rf '{}' + \
+    && find /usr/local/lib/python3.11/site-packages \
+        -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
 COPY app ./app
 COPY scripts ./scripts

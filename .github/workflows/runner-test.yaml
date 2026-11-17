@@ -78,7 +78,6 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-
       # ------------------------------------------------------
       # Install dependencies
       # ------------------------------------------------------
@@ -103,6 +102,12 @@ jobs:
       # ------------------------------------------------------
       - name: Build Docker image
         run: docker build -t rag-chatbot:ci-%GITHUB_SHA% .
+
+
+      # Remove only this workflow's temporary image, including after failures.
+      - name: Clean up CI image
+        if: always()
+        run: docker image rm rag-chatbot:ci-%GITHUB_SHA% 2>NUL || exit /b 0
 
 
   # ==========================================================
@@ -200,8 +205,23 @@ jobs:
       - name: Push Docker image
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+
+        shell: powershell
         run: |
-          docker push %DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA%
+          $image = "$env:DOCKERHUB_USERNAME/rag-chatbot:$env:GITHUB_SHA"
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            docker push $image
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            if ($attempt -lt 3) {
+              Write-Host "Docker Hub push failed; retrying in 15 seconds (attempt $($attempt + 1)/3)."
+              Start-Sleep -Seconds 15
+            }
+          }
+          Write-Error "Docker Hub push failed after 3 attempts."
+          exit 1
+
 
 
       # ------------------------------------------------------
@@ -245,4 +265,13 @@ jobs:
           kubectl -n rag-chatbot rollout status statefulset/qdrant --timeout=180s
           kubectl -n rag-chatbot rollout status deployment/rag-api --timeout=180s
           kubectl -n rag-chatbot rollout status deployment/rag-ui --timeout=180s
+
           kubectl -n rag-chatbot get pods -o wide
+
+      # Remove only the image tag created by this deployment job.
+      - name: Clean up deployment image
+        if: always()
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: docker image rm %DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA% 2>NUL || exit /b 0
+
