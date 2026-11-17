@@ -1,64 +1,248 @@
-# Display name shown in the GitHub Actions workflow list.
-name: Test local runner
+name: CI/CD
 
-# Start the workflow after changes reach main, or when launched manually.
+# ------------------------------------------------------------
+# TRIGGERS
+# ------------------------------------------------------------
+# CI:
+#   Runs when a pull request targets main.
+#
+# CD:
+#   Runs after code is pushed/merged into main.
+#
+# Manual:
+#   Allows the workflow to be started from GitHub Actions.
+# ------------------------------------------------------------
+
 on:
+  pull_request:
+    branches:
+      - main
+
   push:
     branches:
       - main
+
   workflow_dispatch:
 
-# Define the test job and run it on the project's self-hosted Windows runner.
+
+# Prevent two deployments from modifying the Kubernetes
+# environment at exactly the same time.
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+
 jobs:
-  test:
+
+  # ==========================================================
+  # CI JOB
+  # ==========================================================
+  # Runs for:
+  #   - Pull requests targeting main
+  #   - Pushes to main
+  #   - Manual executions
+  #
+  # This job does NOT deploy to Kubernetes.
+  # ==========================================================
+
+  ci:
+    name: CI
     runs-on: [self-hosted, windows, x64]
 
-# Execute command steps through Windows Command Prompt.
     defaults:
       run:
         shell: cmd
 
-# Check out the repository so subsequent steps can access its files.
     steps:
+
+      # ------------------------------------------------------
+      # Checkout
+      # ------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-# Verify that the container and Kubernetes tools are installed and usable.
-      - name: Check tools
+
+      # ------------------------------------------------------
+      # Verify Docker availability
+      # ------------------------------------------------------
+      - name: Check Docker
+        run: docker --version
+
+
+      # ------------------------------------------------------
+      # Python
+      # ------------------------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+
+      # ------------------------------------------------------
+      # Install dependencies
+      # ------------------------------------------------------
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+
+      # ------------------------------------------------------
+      # Tests
+      # ------------------------------------------------------
+      - name: Run tests
+        run: python -m pytest -q
+
+
+      # ------------------------------------------------------
+      # Docker build verification
+      #
+      # The image is built here to ensure that a Pull Request
+      # does not break the Docker image.
+      #
+      # It is NOT pushed to Docker Hub from a Pull Request.
+      # ------------------------------------------------------
+      - name: Build Docker image
+        run: docker build -t rag-chatbot:ci-%GITHUB_SHA% .
+
+
+  # ==========================================================
+  # CD / DEPLOYMENT JOB
+  # ==========================================================
+  #
+  # Runs ONLY when:
+  #
+  #   1. The event is a push
+  #   2. The push is on main
+  #   3. The CI job succeeded
+  #
+  # Therefore, opening a Pull Request cannot deploy the
+  # application to Kubernetes.
+  # ==========================================================
+
+  deploy:
+    name: Deploy to Kubernetes
+
+    needs: ci
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: [self-hosted, windows, x64]
+
+    # GitHub Environment.
+    #
+    # Create an environment named "production" under:
+    #
+    # Repository
+    #   -> Settings
+    #   -> Environments
+    #   -> New environment
+    #   -> production
+    #
+    # Environment protection can later be used for deployment
+    # restrictions/approvals.
+    environment:
+      name: production
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+
+      # ------------------------------------------------------
+      # Checkout main
+      # ------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ------------------------------------------------------
+      # Verify Docker and Kubernetes
+      # ------------------------------------------------------
+      - name: Check deployment tools
         run: |
           docker --version
           kubectl version --client
           kubectl config current-context
           kubectl get nodes
 
-# Use Python 3.11, which has compatible binary wheels for the pinned dependencies.
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
 
-# Install the application's Python dependencies from the lock-style requirements file.
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
-
-# Run the automated test suite.
-      - name: Run tests
-        run: python -m pytest -q
-
-# Log in to Docker Hub
+      # ------------------------------------------------------
+      # Docker Hub authentication
+      # ------------------------------------------------------
       - name: Login to Docker Hub
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-# Build the Docker image and tag it with the current Git commit SHA.
+
+
+      # ------------------------------------------------------
+      # Build immutable production image
+      #
+      # Example:
+      #
+      # username/rag-chatbot:a51db72...
+      #
+      # Using GITHUB_SHA means each deployed image corresponds
+      # to a specific Git commit.
+      # ------------------------------------------------------
       - name: Build Docker image
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        run: docker build -t %DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA% .
+        run: |
+          docker build -t %DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA% .
 
-# Push the image to Docker Hub using the same tag.
+
+      # ------------------------------------------------------
+      # Push image to Docker Hub
+      # ------------------------------------------------------
       - name: Push Docker image
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        run: docker push %DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA%
+        run: |
+          docker push %DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA%
+
+
+      # ------------------------------------------------------
+      # Kubernetes prerequisites
+      # ------------------------------------------------------
+      - name: Verify Kubernetes prerequisites
+        run: |
+          kubectl apply -f k8s/00-namespace.yaml
+          kubectl -n rag-chatbot get secret rag-secrets
+
+
+      # ------------------------------------------------------
+      # Apply Kubernetes manifests
+      # ------------------------------------------------------
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -f k8s/00-namespace.yaml
+          kubectl apply -f k8s/10-configmap.yaml
+          kubectl apply -f k8s/20-qdrant.yaml
+          kubectl apply -f k8s/25-data-pvc.yaml
+          kubectl apply -f k8s/30-api.yaml
+          kubectl apply -f k8s/40-ui.yaml
+
+
+      # ------------------------------------------------------
+      # Deploy the exact Docker image produced for this commit
+      # ------------------------------------------------------
+      - name: Deploy published image
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          kubectl -n rag-chatbot set image deployment/rag-api api=%DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA%
+          kubectl -n rag-chatbot set image deployment/rag-ui ui=%DOCKERHUB_USERNAME%/rag-chatbot:%GITHUB_SHA%
+
+
+      # ------------------------------------------------------
+      # Wait for the Kubernetes rollout
+      # ------------------------------------------------------
+      - name: Verify Kubernetes rollout
+        run: |
+          kubectl -n rag-chatbot rollout status statefulset/qdrant --timeout=180s
+          kubectl -n rag-chatbot rollout status deployment/rag-api --timeout=180s
+          kubectl -n rag-chatbot rollout status deployment/rag-ui --timeout=180s
+          kubectl -n rag-chatbot get pods -o wide
