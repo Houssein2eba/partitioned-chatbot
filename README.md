@@ -1,238 +1,470 @@
-# Enterprise RAG Chatbot — Docker-only
+# Partitioned RAG Chatbot
 
-A production-grade Retrieval-Augmented Generation chatbot over **your own
-documents**. Drop files into `data/`, ingest them, and ask questions through a
-**REST API**, a **CLI**, or a **Streamlit web chat UI**. Every answer is
-**grounded with citations** that point back to the exact source text — so
-answers are verifiable, not hallucinated.
+[![CI/CD](https://github.com/Houssein2eba/partitioned-chatbot/actions/workflows/runner-test.yaml/badge.svg)](https://github.com/Houssein2eba/partitioned-chatbot/actions/workflows/runner-test.yaml)
 
-## Why this stack (cost-effective + enterprise-ready)
+A full-stack Retrieval-Augmented Generation (RAG) chatbot that answers
+questions from a private document collection. The application combines local
+embeddings, a persistent vector database, an OpenAI-compatible LLM API, and
+three user interfaces:
 
-| Concern | Choice | Why |
-|---|---|---|
-| Answering LLM | **Groq** | Configurable hosted LLM for RAG Q&A |
-| Embeddings | **`BAAI/bge-small-en-v1.5`** (local) | Runs on CPU, **zero per-token cost**, fully offline |
-| Vector store | **Qdrant** | Production vector DB; free in Docker, scales to managed cloud |
-| API | **FastAPI** | Async, streaming (SSE), OpenAPI docs, typed |
-| Grounding | **Retrieved-source citations** | Answers include the source chunks used |
-| Hardening | API-key auth, non-root container, JSON logs, healthchecks | Enterprise defaults |
+- A FastAPI REST API with interactive OpenAPI documentation
+- A Server-Sent Events (SSE) streaming endpoint
+- A Streamlit web interface
+- A typed Python SDK and command-line client
 
-The **only** paid dependency is the Groq API. Embeddings and the vector store
-cost nothing to run.
+The project demonstrates API development, vector search, RAG orchestration,
+containerization, Kubernetes deployment, and CI/CD with GitHub Actions.
 
-## This learning branch
+## Key capabilities
 
-This `docker-only` branch intentionally contains only the application and its
-Docker runtime. Kubernetes, Terraform, and CI/CD are introduced in later
-learning branches. The final `main` branch combines all stages.
-
-## Documentation
-
-| Guide | What's in it |
-|---|---|
-| **This README** | Overview, quick start, the three interfaces, API reference |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | Local and Docker deployment guide |
-| [k8s-instructions.md](k8s-instructions.md) | Kubernetes deployment commands |
-| [ci-instructions.md](ci-instructions.md) | Complete CI/CD cycle |
+- **Grounded answers:** the model receives only retrieved document context and
+  is instructed not to use unsupported knowledge.
+- **Source citations:** responses identify cited files and the associated
+  retrieved chunks.
+- **Multiple interfaces:** REST, SSE, Streamlit, and Python CLI/SDK.
+- **Document ingestion:** supports PDF, DOCX, TXT, MD, and Markdown files.
+- **Document filtering:** retrieval can be restricted to selected filenames.
+- **Idempotent indexing:** deterministic chunk IDs prevent duplicate points
+  when a source is re-ingested.
+- **API authentication:** optional API-key validation through `X-API-Key`.
+- **Health and observability:** readiness information and structured JSON logs.
+- **Container-first delivery:** Docker Compose, Kubernetes manifests, and
+  automated build/test/deployment configuration.
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    U[User / CLI / SDK] --> UI[Streamlit UI]
+    U --> API[FastAPI /v1]
+    UI --> API
+
+    API --> ING[Document loaders]
+    ING --> CHUNK[Chunking]
+    CHUNK --> EMB[Local sentence transformer]
+    EMB --> Q[Qdrant collection]
+
+    API --> RET[Top-k retrieval]
+    RET --> Q
+    RET --> GROQ[Groq chat completions]
+    GROQ --> R[Answer + citations]
+    R --> API
 ```
-            ┌─────────────┐   ingest   ┌──────────────┐   embed    ┌──────────┐
-  data/ ───▶│  loaders    │──────────▶│   chunker     │──────────▶│  Qdrant  │
- (your docs)│ pdf/docx/md │            │ (overlapping) │  (bge)    │ (vectors)│
-            └─────────────┘            └──────────────┘            └────┬─────┘
-                                                                        │ top-k
-  question ──▶ /v1/chat ──▶ retrieve ──▶ Groq ──▶ answer + citations
-                                         documents w/ citations enabled
+
+### Runtime components
+
+| Component | Responsibility | Technology |
+|---|---|---|
+| API | Authentication, upload, ingestion, retrieval, chat, streaming | FastAPI, Uvicorn, Pydantic |
+| Knowledge base | Persistent chunk and metadata storage | Qdrant |
+| Embeddings | Generate vector representations locally | `BAAI/bge-small-en-v1.5` |
+| Answer generation | Generate document-grounded responses | Groq API |
+| Web interface | Interactive browser chat | Streamlit |
+| Client | HTTP transport, SSE parsing, typed convenience methods | Python, HTTPX |
+
+## Repository layout
+
+```text
+app/
+  api/               REST routes and API-key authentication
+  rag/               Loading, chunking, embeddings, Qdrant, RAG pipeline
+  config.py          Environment-based configuration
+  logging_config.py  Structured application logging
+  main.py            FastAPI application and lifecycle
+  models.py          Request and response schemas
+client/              Reusable HTTP SDK
+scripts/             Ingestion and interactive CLI commands
+ui/                  Streamlit chat interface
+tests/               Unit and API tests
+k8s/                 Kubernetes deployment manifests
+.github/workflows/   CI/CD pipeline
+data/                Local document corpus; excluded from Git by default
+docker-compose.yml   Local development stack
+Dockerfile           Production container image
+Makefile             Common development commands
 ```
 
-## Quick start (Docker — recommended)
+## Prerequisites
 
-```bash
-# 1. Configure
-cp .env.example .env
-#   edit .env and set GROQ_API_KEY (and APP_API_KEYS for auth)
+- Docker Desktop with Docker Compose v2
+- Python 3.11 or later for local development
+- A Groq API key
+- PowerShell 7 or Windows PowerShell for the commands below
+- Optional: Kubernetes and `kubectl` for cluster deployment
 
-# 2. Add documents
-cp /path/to/your/*.pdf data/
+## Quick start with Docker Compose
 
-# 3. Start the stack (API + Qdrant)
+### 1. Create local configuration
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Set `GROQ_API_KEY` in `.env`. For local development, API authentication may be
+left disabled. For shared or production-like environments, set
+`APP_API_KEYS` and `RAG_API_KEY` to matching values.
+
+Never commit `.env` or real credentials.
+
+### 2. Add documents
+
+Place supported files in `data/`:
+
+- PDF
+- DOCX
+- TXT
+- Markdown (`.md` and `.markdown`)
+
+### 3. Start the stack
+
+```powershell
 docker compose up -d --build
-
-# 4. Ingest your documents
-curl -X POST http://localhost:8000/v1/ingest
-
-# 5. Ask a question
-curl -s -X POST http://localhost:8000/v1/chat \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What is our refund policy?"}' | jq
+docker compose ps
 ```
 
-Interactive API docs: <http://localhost:8000/docs>
-Web chat UI: <http://localhost:8501> (the `ui` service starts automatically).
+This starts Qdrant, the FastAPI API, and the Streamlit UI.
 
-## Quick start (local dev)
+| Service | URL |
+|---|---|
+| Streamlit UI | <http://localhost:8501> |
+| API | <http://localhost:8000> |
+| OpenAPI / Swagger | <http://localhost:8000/docs> |
+| Health | <http://localhost:8000/v1/health> |
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+### 4. Build the index
 
-cp .env.example .env          # set GROQ_API_KEY; QDRANT_URL=http://localhost:6333
-make qdrant                   # start Qdrant in Docker (separate terminal)
-
-cp /path/to/docs/*.pdf data/
-make ingest                   # build the index
-make run                      # start the API at :8000
+```powershell
+curl.exe -X POST http://localhost:8000/v1/ingest
 ```
+
+### 5. Ask a question
+
+```powershell
+curl.exe -X POST http://localhost:8000/v1/chat `
+  -H "Content-Type: application/json" `
+  -d '{\"question\":\"What is this document about?\"}'
+```
+
+Stop the stack with `docker compose down`. The named Qdrant volume preserves
+indexed vectors. Use `docker compose down -v` only when deleting that data is
+intentional.
+
+## Local Python development
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+
+Copy-Item .env.example .env
+make qdrant
+make ingest
+make run
+```
+
+Run the UI in a separate terminal:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+make ui
+```
+
+The Makefile also provides `make test`, `make ask`, `make up`, `make down`,
+and `make logs`. On PowerShell, GNU Make must be available on `PATH`.
 
 ## Interfaces
 
-Three ways to use the bot — all hit the same REST service, so they share the
-same retrieval, grounding, and auth.
+### REST API
 
-### 1. Web chat UI (Streamlit)
+All application endpoints are versioned under `/v1`.
 
-A browser chat front-end with streaming answers, citation/source expanders, and
-buttons to run ingestion and check health.
-
-```bash
-# With docker compose, it's already running:
-open http://localhost:8501
-
-# Or locally (API must be running):
-make ui            # streamlit run ui/streamlit_app.py
+```text
+GET  /v1/health
+POST /v1/chat
+POST /v1/chat/stream
+POST /v1/ingest
+POST /v1/upload
 ```
 
-Set the API URL and key in the sidebar (or via `RAG_API_URL` / `RAG_API_KEY`).
+The complete request and response schemas are available in the interactive
+OpenAPI documentation at `/docs`.
 
-### 2. CLI
+If authentication is enabled, add the configured key to requests:
 
-```bash
-# One-shot (streams by default)
-python -m scripts.chat "What is our refund policy?"
-
-# Interactive multi-turn REPL (/sources, /clear, /exit)
-make ask                          # == python -m scripts.chat
-
-# Options
-python -m scripts.chat "..." --no-stream --top-k 8 --source handbook.pdf --sources
-RAG_API_URL=http://host:8000 RAG_API_KEY=secret python -m scripts.chat "..."
+```text
+X-API-Key: <your-api-key>
 ```
 
-### 3. REST API
-
-All endpoints are under `/v1`. If `APP_API_KEYS` is set, send `X-API-Key: <key>`.
-
-### `POST /v1/chat` — ask a question
+Example chat request:
 
 ```json
 {
-  "question": "How many vacation days do new employees get?",
-  "history": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}],
+  "question": "How many vacation days do new employees receive?",
+  "history": [],
   "top_k": 5,
   "sources": ["handbook.pdf"]
 }
 ```
 
-Response:
+Example response shape:
 
 ```json
 {
   "answer": "New employees receive 15 vacation days per year.",
   "citations": [
-    {"cited_text": "new hires accrue 15 days", "source": "handbook.pdf", "chunk_index": 3}
+    {
+      "cited_text": "new hires accrue 15 days",
+      "source": "handbook.pdf",
+      "chunk_index": 3
+    }
   ],
-  "sources": [{"source": "handbook.pdf", "chunk_index": 3, "score": 0.82, "text": "..."}],
+  "sources": [
+    {
+      "source": "handbook.pdf",
+      "chunk_index": 3,
+      "score": 0.82,
+      "text": "Retrieved source text"
+    }
+  ],
   "model": "openai/gpt-oss-120b",
-  "usage": {"input_tokens": 1203, "output_tokens": 48}
+  "usage": {
+    "input_tokens": 1203,
+    "output_tokens": 48
+  }
 }
 ```
 
-### `POST /v1/chat/stream` — streaming (Server-Sent Events)
+### Streaming
 
-Same request body. Emits `data:` lines, each a JSON event:
+`POST /v1/chat/stream` returns SSE events:
 
-- `{"type": "sources", "sources": [...]}` — what was retrieved (first)
-- `{"type": "text", "text": "..."}` — answer tokens as they arrive
-- `{"type": "done", "citations": [...], "usage": {...}}` — final metadata
+- `sources`: retrieved chunks, sent before generation
+- `text`: answer tokens as they arrive
+- `done`: citations and usage metadata
+- `error`: stream-level failures
 
-```bash
-curl -N -X POST http://localhost:8000/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Summarize the security policy."}'
+```powershell
+curl.exe -N -X POST http://localhost:8000/v1/chat/stream `
+  -H "Content-Type: application/json" `
+  -d '{\"question\":\"Summarize the security policy.\"}'
 ```
 
-### `POST /v1/ingest` — (re)index everything in `data/`
+### Document upload
 
-### `POST /v1/upload` — upload + ingest one file (multipart `file=@...`)
-
-```bash
-curl -X POST http://localhost:8000/v1/upload -F "file=@./contract.pdf"
+```powershell
+curl.exe -X POST http://localhost:8000/v1/upload `
+  -F "file=@./data/contract.pdf"
 ```
 
-### `GET /v1/health` — liveness/readiness + index stats
+The uploaded file is stored in `DATA_DIR`, validated against the supported
+extension list, and ingested immediately.
 
-## How grounding works
+### CLI and SDK
 
-Each retrieved chunk is included in the prompt sent to Groq. Groq is instructed
-to answer **only** from those documents and cite the source filename. The API
-returns the retrieved chunks and derives citations from source mentions in the
-answer. If nothing relevant is retrieved, the bot says so instead of guessing.
+```powershell
+# One-shot question
+python -m scripts.chat "What is our refund policy?"
+
+# Interactive session
+python -m scripts.chat
+
+# Streaming options
+python -m scripts.chat "Summarize the handbook" --no-stream --top-k 8 --sources
+```
+
+The SDK can be used directly from Python:
+
+```python
+from client.sdk import RagClient
+
+with RagClient() as client:
+    print(client.health())
+    print(client.chat("What is this document about?"))
+```
+
+Configure the client with `RAG_API_URL` and `RAG_API_KEY`.
+
+## How RAG works
+
+1. Text is extracted from supported files.
+2. Documents are split into overlapping chunks.
+3. Chunks are converted into local embeddings.
+4. Embeddings and source metadata are stored in Qdrant.
+5. A question is embedded and searched against the collection.
+6. The top matching chunks are sent to Groq with conversation history.
+7. The model is instructed to answer only from that context.
+8. If retrieval produces no sufficiently relevant chunks, the API returns a
+   not-found response instead of invoking an unsupported answer.
+
+Source filtering uses Qdrant payload metadata. Re-ingestion uses deterministic
+point IDs derived from source name and chunk index, so existing points are
+replaced rather than duplicated.
 
 ## Configuration
 
-All via environment variables / `.env` — see [`.env.example`](.env.example).
-Key knobs: `GROQ_MODEL`, `TOP_K`, `CHUNK_SIZE`, `SCORE_THRESHOLD`,
-`APP_API_KEYS`.
+Copy `.env.example` to `.env` and configure the deployment:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GROQ_API_KEY` | empty | Groq API credential |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Chat completion model |
+| `MAX_TOKENS` | `2048` | Maximum answer tokens |
+| `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Local embedding model |
+| `QDRANT_URL` | `http://localhost:6333` | Qdrant endpoint |
+| `QDRANT_API_KEY` | empty | Optional Qdrant credential |
+| `QDRANT_COLLECTION` | `documents` | Collection name |
+| `DATA_DIR` | `./data` | Directory used for ingestion and uploads |
+| `CHUNK_SIZE` | `512` | Target chunk size |
+| `CHUNK_OVERLAP` | `64` | Overlap between neighboring chunks |
+| `TOP_K` | `5` | Default number of retrieved chunks |
+| `SCORE_THRESHOLD` | `0.5` | Minimum cosine retrieval score |
+| `APP_API_KEYS` | empty | Comma-separated accepted API keys |
+| `CORS_ORIGINS` | `*` | Comma-separated allowed browser origins |
+| `LOG_LEVEL` | `INFO` | Application log level |
+| `RAG_API_URL` | `http://localhost:8000` | CLI/UI API base URL |
+| `RAG_API_KEY` | empty | API key used by the CLI/UI |
 
 ## Testing
 
-```bash
-make test        # or: pytest -q
+The test suite runs without Qdrant or a Groq API key by mocking external
+dependencies:
+
+```powershell
+python -m pytest -q
 ```
 
-Tests mock Qdrant and the answering pipeline, so they run with no services and
-no API key.
+Common coverage areas include API routing, request validation, authentication,
+chunking behavior, and SDK transport.
 
-## Production notes
+For Docker validation:
 
-- **Auth**: always set `APP_API_KEYS` (comma-separated) in production.
-- **Secrets**: inject `GROQ_API_KEY` via your secrets manager, not a
-  committed `.env`.
-- **Scaling**: the API is stateless — run multiple replicas behind a load
-  balancer. Point them at a shared/managed Qdrant.
-- **Cost control**: choose an appropriate `GROQ_MODEL` for your workload. Lower
-  `TOP_K` to reduce input tokens.
-- **Observability**: logs are structured JSON on stdout — ship to your log
-  platform.
-
-## Deployment
-
-This branch uses Docker Compose only:
-
-```bash
+```powershell
+docker build -t partitioned-chatbot:local .
+docker compose config
 docker compose up -d --build
-curl -X POST http://localhost:8000/v1/ingest
+docker compose ps
 ```
 
-Kubernetes, CI/CD, and Terraform are deliberately added in later branches.
+## Kubernetes
 
-## Project structure
+The `k8s/` directory contains manifests for a local Docker Desktop Kubernetes
+cluster or a similar single-cluster environment:
 
+- Namespace
+- ConfigMap
+- Qdrant StatefulSet and Service
+- Persistent data claim
+- API Deployment and Service
+- Streamlit Deployment and Service
+
+Build the local image, create the secret, apply the manifests, and open port
+forwards as documented in [k8s/README.md](k8s/README.md) and
+[k8s-instructions.md](k8s-instructions.md).
+
+These manifests use `ClusterIP` services and do not provide public ingress,
+DNS, TLS termination, or cloud-provider autoscaling.
+
+## CI/CD
+
+The GitHub Actions workflow in
+[`.github/workflows/runner-test.yaml`](.github/workflows/runner-test.yaml)
+uses a Windows self-hosted runner and separates continuous integration from
+deployment:
+
+```text
+Pull request to main
+  -> Python tests
+  -> Docker image build validation
+
+Push to main
+  -> CI succeeds
+  -> Build immutable image using GitHub SHA
+  -> Push image to Docker Hub
+  -> Deploy to Kubernetes
 ```
-app/            FastAPI service
-  api/          routes + API-key auth
-  rag/          chunking, embeddings, Qdrant, ingestion, answer pipeline
-  config.py     env-driven settings   models.py  request/response schemas
-client/         Python SDK used by the CLI + UI
-scripts/        ingest.py (index data/)   chat.py (CLI chat)
-ui/             Streamlit web chat
-tests/          unit tests (mock Qdrant + answering pipeline)
-Dockerfile  docker-compose*.yml  Makefile  requirements.txt
+
+Before enabling deployment, configure the GitHub repository secrets:
+
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
+
+For production environments, also configure a protected GitHub environment,
+branch protection rules, deployment approvals, and cluster credentials.
+Repository-level credential handling and infrastructure requirements are
+documented in [ci-cd.md](ci-cd.md).
+
+## Security
+
+- Keep `GROQ_API_KEY` out of source control.
+- Set `APP_API_KEYS` outside local development; an empty value intentionally
+  leaves the API open.
+- Restrict `CORS_ORIGINS` when browser access is public.
+- Use HTTPS and a reverse proxy or ingress for internet-facing deployments.
+- Store secrets in a platform secret manager or Kubernetes Secret.
+- Replace the local Qdrant deployment with authenticated, backed-up storage
+  for shared environments.
+- Review documents for sensitive or regulated content before indexing.
+- Treat uploaded files as untrusted input and apply malware scanning for public
+  upload services.
+
+The current API key mechanism is suitable for simple service-to-service
+authentication. It is not a replacement for an OAuth/OIDC identity system,
+fine-grained authorization, or per-user tenancy.
+
+## Operations
+
+Useful Docker commands:
+
+```powershell
+docker compose logs -f api
+docker compose logs -f ui
+docker compose logs -f qdrant
+docker compose restart api
+docker compose down
 ```
-# partitioned-chatbot
-# partitioned-chatbot
 
+Verify service health:
 
+```powershell
+curl.exe http://localhost:8000/v1/health
+```
 
+Expected high-level states:
+
+- `status: "ok"`: API can reach Qdrant.
+- `status: "degraded"`: Qdrant is unreachable.
+- `vectors`: number of indexed vectors in the configured collection.
+
+The API container is non-root, JSON application logs are written to stdout, and
+the Docker image includes a health check. Qdrant data is persisted by a named
+Docker volume or Kubernetes PVC.
+
+## Deployment and maturity
+
+The repository provides working local, Docker Compose, Kubernetes, and CI/CD
+paths. It is suitable as a portfolio project and for controlled internal
+environments, but the following items should be addressed before a public,
+multi-tenant production release:
+
+- Managed or replicated Qdrant with backups and encryption
+- TLS certificates and production ingress
+- Centralized secrets and log/metrics/tracing providers
+- Rate limiting and request-size controls
+- Authentication with identity-provider integration
+- Document access control and tenant isolation
+- Automated model evaluation and retrieval quality monitoring
+- Data retention and deletion workflows
+- Disaster recovery and restore procedures
+
+## Documentation index
+
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Docker and local deployment
+- [k8s/README.md](k8s/README.md) - Docker Desktop Kubernetes deployment
+- [k8s-instructions.md](k8s-instructions.md) - Detailed Kubernetes operations
+- [ci-cd.md](ci-cd.md) - CI/CD and branch protection guidance
+- [docker-compose.deploy.yml](docker-compose.deploy.yml) - Published-image deployment
+
+## License
+
+No license is currently declared in this repository. Add a license before
+reusing or distributing the project outside your organization.
