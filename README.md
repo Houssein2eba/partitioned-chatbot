@@ -22,7 +22,7 @@ containerization, Kubernetes deployment, and CI/CD with GitHub Actions.
 - **Source citations:** responses identify cited files and the associated
   retrieved chunks.
 - **Multiple interfaces:** REST, SSE, Streamlit, and Python CLI/SDK.
-- **Document ingestion:** supports PDF, DOCX, TXT, MD, and Markdown files.
+- **Document ingestion:** supports PDF, DOCX, XLSX, TXT, MD, and Markdown files.
 - **Document filtering:** retrieval can be restricted to selected filenames.
 - **Idempotent indexing:** deterministic chunk IDs prevent duplicate points
   when a source is re-ingested.
@@ -112,6 +112,7 @@ Place supported files in `data/`:
 
 - PDF
 - DOCX
+- XLSX (Excel workbooks)
 - TXT
 - Markdown (`.md` and `.markdown`)
 

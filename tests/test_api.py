@@ -64,3 +64,29 @@ def test_auth_enforced_when_keys_configured():
             assert authed.status_code == 200
     finally:
         settings.api_keys = []
+
+
+def test_upload_accepts_xlsx(tmp_path):
+    from types import SimpleNamespace
+
+    with (
+        patch(
+            "app.api.routes.get_settings",
+            return_value=SimpleNamespace(data_dir=str(tmp_path)),
+        ),
+        patch("app.api.routes.vectorstore.ensure_collection"),
+        patch("app.api.routes.ingest.ingest_file", return_value=(2, None)),
+    ):
+        resp = client.post(
+            "/v1/upload",
+            files={
+                "file": (
+                    "report.xlsx",
+                    b"excel content",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["chunks_indexed"] == 2

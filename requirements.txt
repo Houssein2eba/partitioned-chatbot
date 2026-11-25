@@ -18,6 +18,7 @@ qdrant-client==1.12.2
 # --- Document loaders ---
 pypdf==5.1.0
 python-docx==1.1.2
+openpyxl==3.1.5
 
 # --- Web chat UI (Streamlit) ---
 streamlit==1.41.1
