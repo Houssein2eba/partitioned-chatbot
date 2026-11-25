@@ -64,7 +64,7 @@ with st.sidebar:
     st.subheader("📎 Add documents")
     uploads = st.file_uploader(
         "Upload files to the knowledge base",
-        type=["pdf", "docx", "txt", "md", "markdown"],
+        type=["pdf", "docx", "xlsx", "txt", "md", "markdown"],
         accept_multiple_files=True,
     )
     if uploads and st.button("Upload & ingest", type="primary"):
